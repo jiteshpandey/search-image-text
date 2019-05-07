@@ -1,0 +1,96 @@
+#!/bin/bash
+BPATH=$1  # Path to directory containing images.
+OPATH=~/.pictext  # Path to output directory.
+LANG=""   # See man tesseract > LANGUAGES
+SEARCHFOR=$2
+# If the output path does not exist, attempt to create it.
+if [ $(echo "$BPATH" | wc -c ) -lt 2 ]
+    then
+    BPATH=`pwd`
+fi
+
+if [ ! -d "$OPATH" ]; then
+    mkdir -pv "$OPATH"
+    touch $OPATH/filelist
+fi
+
+if [ -f "$OPATH/filelist.backup" ]; then
+    rm $OPATH/filelist.backup
+fi
+
+sort filelist > filelist.1
+mv filelist.1 filelist
+find ${HOME} -not -path '*/\.*' -type f \( -name "*.png" -or -name "*.jpg" \) | sort > $OPATH/filelist.backup
+
+if [ $(echo "$LANG" | wc -c ) -lt 3 ]   # Language defaults to eng.
+    then
+        LANG='eng'
+fi
+
+OIFS="$IFS"
+IFS=$'\n'
+
+###REMOVE LOOP
+for FILEPATH in `comm -2 -3 $OPATH/filelist $OPATH/filelist.backup`
+do
+echo "REMOVING"
+    dirpath=${FILEPATH#$HOME}
+    dir=${dirpath%/*}
+    outputfile=${FILEPATH##*/}
+    if [ -f "$OPATH/$dir/$outputfile.txt" ]; then
+    rm $OPATH/$dir/$outputfile.txt
+    fi
+    sed -i "s:$FILEPATH::g" $OPATH/filelist
+    sed -i '/^\s*$/d' $OPATH/filelist
+done
+
+###ADDITION LOOP
+aadlist=1
+totallist=`comm -2 -3 $OPATH/filelist.backup $OPATH/filelist | wc -l`
+for FILEPATH in `comm -2 -3 $OPATH/filelist.backup $OPATH/filelist`
+do
+echo "ADDING $addlist of $totallist"
+((addlist++))
+    dirpath=${FILEPATH#$HOME}
+    dir=${dirpath%/*}
+    outputfile=${FILEPATH##*/}
+    mkdir -p $OPATH/$dir
+    if [ ! -f "$FILEPATH" ]; then
+	echo 'File not there, aborting.'
+	exit
+    fi
+    # Path to text file to be created. E.g. ./myfile.txt
+    OUTFILE=$OPATH/$dir/$outputfile
+    # The text file will be created regardless of whether
+    #  text is successfully extracted.
+    # Attempt to use tessaract to extract embedded text.
+    # Use imagemagick to convert the PDF to a high-rest multi-page TIFF.
+    convert -colorspace gray -resize 3000x -units PixelsPerInch "$FILEPATH" ~/temp.tiff > /dev/null 2>&1
+    # Then use Tesseract to perform OCR on the tiff.
+    tesseract ./temp.tiff "$OUTFILE" -l $LANG > /dev/null 2>&1
+    # We don't need then intermediate TIFF file, so discard it.
+    rm ./temp.tiff
+    echo "$FILEPATH" >> $OPATH/filelist
+done
+
+dirpath=${BPATH#$HOME}
+filelist=`grep -lri $2 ~/.pictext/$dirpath | grep -Po '.*(?=\.)' | sed 's:'"$HOME/.pictext"':'"$HOME/"':'`
+
+imgfile="";
+for inline in $filelist
+do
+    imgfile+="<img src='file://$inline'>"
+done
+
+echo "
+<html>
+<head>
+  <style> img { padding: 0.5rem; width: 10rem; display: inline-block; } </style>
+  <title>Search result for $2</title>
+  <body>
+   $imgfile
+  </body>
+</head>
+</html>
+" > /tmp/searchresult.html
+xdg-open /tmp/searchresult.html  > /dev/null 2>&1
