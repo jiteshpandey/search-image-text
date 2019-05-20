@@ -1,96 +1,180 @@
 #!/bin/bash
-BPATH=$1  # Path to directory containing images.
-OPATH=~/.pictext  # Path to output directory.
-LANG=""   # See man tesseract > LANGUAGES
-SEARCHFOR=$2
-# If the output path does not exist, attempt to create it.
+
+usage() { echo "Usage: $0 [-r -a DIRECTORY -s SEARCHTEXT ]" 1>&2; exit 1; }
+
+export REMOVE=false;
+export ADD=false;
+export SEARCH=false;
+export BPATH=${pwd}
+export OPATH=~/.pictext 
+export LANG=""
+export SEARCHFOR=""
+export FILELIST="$OPATH/.filelist"
+while getopts ":ra:s:" o; do
+ case "${o}" in
+   r)
+     REMOVE=true
+   ;;
+   a)
+     if [ -z "$OPTARG" ]
+     then
+        usage
+     fi
+     ADD=true
+     BPATH=${OPTARG}
+     BPATH=`realpath $BPATH`
+   ;;
+   s)
+     if [ -n "$OPTARG" ]
+     then
+        usage
+     fi
+     SEARCH=true
+     SEARCHFOR=${OPTARG}
+   ;;
+   *)
+    usage
+   ;;
+ esac
+done
+shift $((OPTIND-1))
+
+if [ $(echo "$LANG" | wc -c ) -lt 3 ]   # Language defaults to eng.
+then
+LANG='eng'
+fi
+
 if [ $(echo "$BPATH" | wc -c ) -lt 2 ]
-    then
-    BPATH=`pwd`
+then
+BPATH=`pwd`
 fi
 
 if [ ! -d "$OPATH" ]; then
-    mkdir -pv "$OPATH"
-    touch $OPATH/filelist
-fi
-
-if [ -f "$OPATH/filelist.backup" ]; then
-    rm $OPATH/filelist.backup
-fi
-
-sort filelist > filelist.1
-mv filelist.1 filelist
-find ${HOME} -not -path '*/\.*' -type f \( -name "*.png" -or -name "*.jpg" \) | sort > $OPATH/filelist.backup
-
-if [ $(echo "$LANG" | wc -c ) -lt 3 ]   # Language defaults to eng.
-    then
-        LANG='eng'
+mkdir -pv "$OPATH"
+touch $FILELIST
 fi
 
 OIFS="$IFS"
 IFS=$'\n'
 
+if [ -f "$FILELIST.backup" ]; then
+rm "$FILELIST.backup"
+fi
+
+find $OPATH -not -path '*/\.*' | sort -u | sed 's:'"$OPATH"':'"$HOME"':' > "$FILELIST.1"
+mv "$FILELIST.1" $FILELIST
+
+if [ "$REMOVE" = true ]; then
+
+RealPath=`realpath $HOME`
+
+find $RealPath -not -path '*/\.*' -type f \( -name "*.png" -or -name "*.jpg" \) | sort -u > "$FILELIST.backup"
+
 ###REMOVE LOOP
-for FILEPATH in `comm -2 -3 $OPATH/filelist $OPATH/filelist.backup`
+for FILEPATH in `comm -2 -3 $OPATH/filelist "$FILELIST.backup"`
 do
 echo "REMOVING"
-    dirpath=${FILEPATH#$HOME}
-    dir=${dirpath%/*}
-    outputfile=${FILEPATH##*/}
-    if [ -f "$OPATH/$dir/$outputfile.txt" ]; then
-    rm $OPATH/$dir/$outputfile.txt
-    fi
-    sed -i "s:$FILEPATH::g" $OPATH/filelist
-    sed -i '/^\s*$/d' $OPATH/filelist
+dirpath=${FILEPATH#$HOME}
+dir=${dirpath%/*}
+outputfile=${FILEPATH##*/}
+if [ -f "$OPATH/$dir/$outputfile.txt" ]; then
+rm -r $OPATH/$dir/$outputfile.txt
+fi
+sed -i "s:$FILEPATH::g" $FILELIST
+sed -i '/^\s*$/d' $FILELIST
 done
 
-###ADDITION LOOP
+fi
+
+if [ "$ADD" = true ]; then
+RealPath=`realpath $BPATH`
+
+find $RealPath -not -path '*/\.*' -type f \( -name "*.pdf" -or -name "*.png" -or -name "*.jpg" \) | sort -u > "$FILELIST.backup"
+
+##ADDITION LOOP
 aadlist=1
-totallist=`comm -2 -3 $OPATH/filelist.backup $OPATH/filelist | wc -l`
-for FILEPATH in `comm -2 -3 $OPATH/filelist.backup $OPATH/filelist`
+totallist=`comm -2 -3 "$FILELIST.backup" $FILELIST | wc -l`
+for FILEPATH in `comm -2 -3 "$FILELIST.backup" $FILELIST`
 do
-echo "ADDING $addlist of $totallist"
-((addlist++))
-    dirpath=${FILEPATH#$HOME}
-    dir=${dirpath%/*}
-    outputfile=${FILEPATH##*/}
-    mkdir -p $OPATH/$dir
-    if [ ! -f "$FILEPATH" ]; then
+        ((addlist++))
+	echo "ADDING $addlist of $totallist"
+	dirpath=${FILEPATH#$HOME}
+	dir=${dirpath%/*}
+	outputfile=${FILEPATH##*/}
+	mkdir -p $OPATH/$dir
+	if [ ! -f "$FILEPATH" ]; then
 	echo 'File not there, aborting.'
 	exit
-    fi
-    # Path to text file to be created. E.g. ./myfile.txt
-    OUTFILE=$OPATH/$dir/$outputfile
-    # The text file will be created regardless of whether
-    #  text is successfully extracted.
-    # Attempt to use tessaract to extract embedded text.
-    # Use imagemagick to convert the PDF to a high-rest multi-page TIFF.
-    convert -colorspace gray -resize 3000x -units PixelsPerInch "$FILEPATH" ~/temp.tiff > /dev/null 2>&1
-    # Then use Tesseract to perform OCR on the tiff.
-    tesseract ./temp.tiff "$OUTFILE" -l $LANG > /dev/null 2>&1
-    # We don't need then intermediate TIFF file, so discard it.
-    rm ./temp.tiff
-    echo "$FILEPATH" >> $OPATH/filelist
+	fi
+
+	OUTFILE=$OPATH/$dir/$outputfile
+
+	case "$FILEPATH" in
+	*.jpg | *.png | *.bmp)
+	convert -colorspace gray -resize 3000x -units PixelsPerInch "$FILEPATH" /tmp/temp.tiff > /dev/null 2>&1
+	tesseract /tmp/temp.tiff "$OUTFILE" -l $LANG > /dev/null 2>&1
+	rm /tmp/temp.tiff
+	;;
+
+	*.xls | *.xlsx)
+	ssconvert "$FILEPATH" "$OUTFILE" > /dev/null 2>&1
+	;;
+
+	*.odt)
+	odt2txt "$FILEPATH" "$OUTFILE" > /dev/null 2>&1
+	;;
+
+	*.doc |*.docx)
+	docx2txt "$FILEPATH" "$OUTFILE" > /dev/null 2>&1
+	;;
+
+	*.pdf)
+	temp_pic=$(mktemp -d /tmp/searchtext-XXXXXX)
+	temp_txt=$(mktemp -d /tmp/searchtext-XXXXXX)
+	convert -colorspace gray -resize 3000x -units PixelsPerInch "$FILEPATH" $temp_pic/image.tiff > /dev/null 2>&1
+	for tpic in $(find $temp_pic -type f -name "*.tiff" | sort -t '-' -k2 -n)
+	do
+	 tesseract $tpic $temp_txt/$(basename $tpic) -l $LANG > /dev/null 2>&1
+	done
+
+	for ttext in $(find $temp_txt -type f -name "*.txt" | sort -t '-' -k2 -n)
+	do
+	 cat $ttext >> "$OUTFILE".txt
+	done
+	#rm -r $temp_txt $temp_pic
+	;;
+
+	esac
+echo $FILEPATH
+	echo "$FILEPATH" >> $FILELIST
+cat $FILELIST
 done
+fi
 
-dirpath=${BPATH#$HOME}
-filelist=`grep -lri $2 ~/.pictext/$dirpath | grep -Po '.*(?=\.)' | sed 's:'"$HOME/.pictext"':'"$HOME/"':'`
+if [ "$SEARCH" = true ]; then
+	dirpath=${BPATH#$HOME}
+	if [ -d $dirpath ]; then
+	filelist=`grep -lri $2 ~/.pictext/$dirpath | grep -Po '.*(?=\.)' | sed 's:'"$HOME/.pictext"':'"$HOME/"':'`
+	elif [ -f $dirpath ]; then
+	filelist=`grep -ri $2 ~/.pictext/$dirpath | grep -Po '.*(?=\.)' | sed 's:'"$HOME/.pictext"':'"$HOME/"':'`
+	fi
 
-imgfile="";
-for inline in $filelist
-do
-    imgfile+="<img src='file://$inline'>"
-done
+	imgfile="";
+	for inline in $filelist
+	do
+	imgfile+="<img src='file://$inline'>"
+	done
 
-echo "
-<html>
-<head>
-  <style> img { padding: 0.5rem; width: 10rem; display: inline-block; } </style>
-  <title>Search result for $2</title>
-  <body>
-   $imgfile
-  </body>
-</head>
-</html>
-" > /tmp/searchresult.html
-xdg-open /tmp/searchresult.html  > /dev/null 2>&1
+	echo "
+	<html>
+	<head>
+	<style> img { padding: 0.5rem; width: 10rem; display: inline-block; } </style>
+	<title>Search result for $2</title>
+	<body>
+	$imgfile
+	</body>
+	</head>
+	</html>
+	" > /tmp/searchresult.html
+	xdg-open /tmp/searchresult.html  > /dev/null 2>&1
+fi
