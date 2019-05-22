@@ -1,6 +1,12 @@
 #!/bin/bash
 
 usage() { echo "Usage: $0 [-r -a DIRECTORY -s SEARCHTEXT ]" 1>&2; exit 1; }
+if ! [ -x "$(command -v convert)" ]; then echo "Imagick Not installed" >&2; exit 1; fi
+if ! [ -x "$(command -v tesseract)" ]; then echo "Tesseract Not installed" >&2; exit 1; fi
+if ! [ -x "$(command -v ssconvert)" ]; then echo "ssconvert Not installed" >&2; exit 1; fi
+if ! [ -x "$(command -v odt2txt)" ]; then echo "odt2txt Not installed" >&2; exit 1; fi
+if ! [ -x "$(command -v catdoc)" ]; then echo "catdoc Not installed" >&2; exit 1; fi
+if ! [ -x "$(command -v docx2txt)" ]; then echo "docx2txt Not installed" >&2; exit 1; fi
 
 export REMOVE=false;
 export ADD=false;
