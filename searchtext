@@ -6,10 +6,10 @@ export REMOVE=false;
 export ADD=false;
 export SEARCH=false;
 export BPATH=${pwd}
-export OPATH=~/.pictext 
+export OPATH=`realpath ~/.pictext`
 export LANG=""
 export SEARCHFOR=""
-export FILELIST="$OPATH/.filelist"
+export FILELIST=`mktemp`
 while getopts ":ra:s:" o; do
  case "${o}" in
    r)
@@ -23,6 +23,10 @@ while getopts ":ra:s:" o; do
      ADD=true
      BPATH=${OPTARG}
      BPATH=`realpath $BPATH`
+     if ! [ -d "$BPATH" ]
+     then
+      usage
+     fi
    ;;
    s)
      if [ -n "$OPTARG" ]
@@ -51,7 +55,6 @@ fi
 
 if [ ! -d "$OPATH" ]; then
 mkdir -pv "$OPATH"
-touch $FILELIST
 fi
 
 OIFS="$IFS"
@@ -61,17 +64,15 @@ if [ -f "$FILELIST.backup" ]; then
 rm "$FILELIST.backup"
 fi
 
-find $OPATH -not -path '*/\.*' | sort -u | sed 's:'"$OPATH"':'"$HOME"':' > "$FILELIST.1"
-mv "$FILELIST.1" $FILELIST
+find $OPATH -type f -name "*.txt" 2>&1 | grep -Po '.*(?=\.)' | sort -u | sed 's:'"$OPATH"':'"$HOME"':' > $FILELIST
 
 if [ "$REMOVE" = true ]; then
 
 RealPath=`realpath $HOME`
 
-find $RealPath -not -path '*/\.*' -type f \( -name "*.png" -or -name "*.jpg" \) | sort -u > "$FILELIST.backup"
-
+find $RealPath -not -path '*/\.*' -type f \( -name "*.docx" -or -name "*.doc" -or -name "*.xls" -or -name "*.xlsx" -or -name "*.odt" -or -name "*.ods" -or -name "*.pdf" -or -name "*.png" -or -name "*.jpg" -or -name "*.bmp" \) 2>&1 | sort -u > "$FILELIST.backup"
 ###REMOVE LOOP
-for FILEPATH in `comm -2 -3 $OPATH/filelist "$FILELIST.backup"`
+for FILEPATH in `comm -2 -3 $FILELIST "$FILELIST.backup"`
 do
 echo "REMOVING"
 dirpath=${FILEPATH#$HOME}
@@ -89,7 +90,8 @@ fi
 if [ "$ADD" = true ]; then
 RealPath=`realpath $BPATH`
 
-find $RealPath -not -path '*/\.*' -type f \( -name "*.pdf" -or -name "*.png" -or -name "*.jpg" \) | sort -u > "$FILELIST.backup"
+find $RealPath -not -path '*/\.*' -type f \( -name "*.docx" -or -name "*.doc" -or -name "*.xls" -or -name "*.xlsx" -or -name "*.odt" -or -name "*.ods" -or -name "*.pdf" -or -name "*.png" -or -name "*.jpg" -or -name "*.bmp" \) 2>&1 | sort -u > "$FILELIST.backup"
+
 
 ##ADDITION LOOP
 aadlist=1
@@ -111,28 +113,32 @@ do
 
 	case "$FILEPATH" in
 	*.jpg | *.png | *.bmp)
-	convert -colorspace gray -resize 3000x -units PixelsPerInch "$FILEPATH" /tmp/temp.tiff > /dev/null 2>&1
-	tesseract /tmp/temp.tiff "$OUTFILE" -l $LANG > /dev/null 2>&1
-	rm /tmp/temp.tiff
+	convert -colorspace gray -resize 3000x -units PixelsPerInch "$FILEPATH" /tmp/temp.png > /dev/null 2>&1
+	tesseract /tmp/temp.png "$OUTFILE" -l $LANG > /dev/null 2>&1
+	rm /tmp/temp.png
 	;;
 
 	*.xls | *.xlsx)
-	ssconvert "$FILEPATH" "$OUTFILE" > /dev/null 2>&1
+	ssconvert "$FILEPATH" "$OUTFILE".txt > /dev/null 2>&1
 	;;
 
-	*.odt)
-	odt2txt "$FILEPATH" "$OUTFILE" > /dev/null 2>&1
+	*.odt | *.ods)
+	odt2txt "$FILEPATH" > "$OUTFILE".txt
 	;;
 
-	*.doc |*.docx)
-	docx2txt "$FILEPATH" "$OUTFILE" > /dev/null 2>&1
+	*.doc)
+	catdoc "$FILEPATH" > "$OUTFILE".txt
+	;;
+
+	*.docx)
+	docx2txt "$FILEPATH" "$OUTFILE".txt > /dev/null 2>&1
 	;;
 
 	*.pdf)
 	temp_pic=$(mktemp -d /tmp/searchtext-XXXXXX)
 	temp_txt=$(mktemp -d /tmp/searchtext-XXXXXX)
-	convert -colorspace gray -resize 3000x -units PixelsPerInch "$FILEPATH" $temp_pic/image.tiff > /dev/null 2>&1
-	for tpic in $(find $temp_pic -type f -name "*.tiff" | sort -t '-' -k2 -n)
+	convert -colorspace gray -resize 3000x -units PixelsPerInch "$FILEPATH" $temp_pic/image.png > /dev/null 2>&1
+	for tpic in $(find $temp_pic -type f -name "*.png" | sort -t '-' -k2 -n)
 	do
 	 tesseract $tpic $temp_txt/$(basename $tpic) -l $LANG > /dev/null 2>&1
 	done
@@ -141,13 +147,10 @@ do
 	do
 	 cat $ttext >> "$OUTFILE".txt
 	done
-	#rm -r $temp_txt $temp_pic
+	rm -r $temp_txt $temp_pic
 	;;
 
 	esac
-echo $FILEPATH
-	echo "$FILEPATH" >> $FILELIST
-cat $FILELIST
 done
 fi
 
